@@ -534,13 +534,13 @@ int main() {
     spec.kvDim = (spec.dim * spec.nKvHeads) / spec.nHeads;
     spec.vocabSize = 32000;
     spec.floatType = F32;
-    spec.sliceCount = 4;
+    spec.sliceCount = 1;
 
     TransformerConfig config;
     config.nThread = 4;
 
     SharedBuffer* buffer = initSharedBuffer(&spec);
-    NativeTransformerState* transformerState = new NativeTransformerState(buffer);
+    NativeTransformerState* transformerState = new NativeTransformerState(buffer, &config);
     TransformerBlock block(0, &spec, &config, transformerState, NULL);
 
     long wBytes = 809533440;

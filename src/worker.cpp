@@ -216,7 +216,7 @@ void Worker::handleHello() {
     readSocket((void*)&spec, sizeof(TransformerSpec));
     layers = new WorkerLayer[spec.nLayers];
     buffer = initSharedBuffer(&spec);
-    state = new WorkerTransformerState(buffer, this);
+    state = new WorkerTransformerState(buffer, this, config);
     printf("Set slice index %d\n", sliceIndex);
 }
 
@@ -366,7 +366,7 @@ void Worker::serve(TransformerConfig* config, int port) {
 // WorkerTransformerState
 //
 
-WorkerTransformerState::WorkerTransformerState(SharedBuffer* buffer, Worker* worker) {
+WorkerTransformerState::WorkerTransformerState(SharedBuffer* buffer, Worker* worker, TransformerConfig* config) : TransformerState(config) {
     this->buffer = buffer;
     this->worker = worker;
 }

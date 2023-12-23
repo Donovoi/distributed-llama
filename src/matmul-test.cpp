@@ -103,7 +103,8 @@ void compareOrFail(const char *name, float* o, float* eo, int size) {
 }
 
 void test_f32() {
-    matmul(F32, 4, output, input, weights, n, d);
+    Matmul matmul(4);
+    matmul.mul(F32, output, input, weights, n, d);
     compareOrFail("f32", output, expectedOutputF32, d);
 }
 
@@ -114,6 +115,7 @@ void test_q40() {
         0x31, 0xaf, 0x67, 0x45, 0x34, 0x12, 0x80, 0x67, 0x45, 0x34, 0x12, 0x80, 0x67, 0x45, 0x34, 0x12, 0x80, 0x67,
     };
     BlockQ40 qWeights[blocks];
+    Matmul matmul(4);
     float input[n];
     unsigned long long qstate = 800000010L;
 
@@ -128,44 +130,37 @@ void test_q40() {
         input[i] = randomF32(&qstate);
     }
 
-    matmul(Q40, 4, output, input, (char*)qWeights, n, d);
+    matmul.mul(Q40, output, input, (char*)qWeights, n, d);
 
     compareOrFail("q40", output, expectedOutputQ40, n);
-
-    long t0 = timeMs();
-    for (int a = 0; a < 10000; a++) {
-        matmul(Q40, 1, output, input, (char*)qWeights, n, d);
-    }
-    long t1 = timeMs();
-    printf("10000 x q40: %ld ms\n", t1 - t0);
 }
 
 void test_f32_sliced() {
     int slices = 8;
 
-    MatMulSlice* slice = new MatMulSlice(F32, slices, n, d);
+    MatMulSlice slice(F32, slices, n, d);
+    Matmul matmul(4);
 
     for (int s = 0; s < slices; s++) {
-        char* weights0 = new char[slice->weights0Bytes];
+        char* weights0 = new char[slice.weights0Bytes];
 
-        long weightsOffset = slice->splitWeights(s, weights, weights0);
+        long weightsOffset = slice.splitWeights(s, weights, weights0);
 
-        float* output0 = new float[slice->d0];
-        matmul(F32, 4, output0, input, weights0, slice->n, slice->d0);
+        float* output0 = new float[slice.d0];
+        matmul.mul(F32, output0, input, weights0, slice.n, slice.d0);
 
-        long outputOffset = slice->mergeOutputs(s, output, output0);
+        long outputOffset = slice.mergeOutputs(s, output, output0);
 
         delete[] weights0;
         delete[] output0;
 
         printf("weights <%8ld, %8ld> output <%4ld, %4ld>\n",
             weightsOffset,
-            weightsOffset + slice->weights0Bytes,
+            weightsOffset + slice.weights0Bytes,
             outputOffset,
-            outputOffset + slice->d0);
+            outputOffset + slice.d0);
     }
 
-    delete slice;
     compareOrFail("f32_sliced", output, expectedOutputF32, d);
 }
 

@@ -64,7 +64,7 @@ private:
     SharedBuffer* buffer;
     Worker* worker;
 public:
-    WorkerTransformerState(SharedBuffer* buffer, Worker* worker);
+    WorkerTransformerState(SharedBuffer* buffer, Worker* worker, TransformerConfig* config);
     char* getSlicedBuffer(uint8_t bufferIndex, uint8_t sliceIndex);
     char* getUnitBuffer(uint8_t bufferIndex);
     void readSlicedBuffer(uint8_t bufferIndex, uint8_t sliceIndex);

@@ -29,7 +29,12 @@ char* newBuffer(size_t size) {
     return buffer;
 }
 
-NativeTransformerState::NativeTransformerState(SharedBuffer* buffer) {
+TransformerState::TransformerState(TransformerConfig* config) {
+    matmul = new Matmul(config->nThread);
+}
+
+NativeTransformerState::NativeTransformerState(SharedBuffer* buffer, TransformerConfig* config)
+    : TransformerState(config) {
     this->buffer = buffer;
 }
 
@@ -45,7 +50,8 @@ void NativeTransformerState::readSlicedBuffer(uint8_t bufferIndex, uint8_t slice
 void NativeTransformerState::sendSlicedBuffer(uint8_t bufferIndex, uint8_t sliceIndex) {}
 void NativeTransformerState::sendUnitBuffer(uint8_t bufferIndex, uint8_t sliceIndex) {}
 
-RemoteTransformerState::RemoteTransformerState(SharedBuffer* buffer, RemoteClient* client) {
+RemoteTransformerState::RemoteTransformerState(SharedBuffer* buffer, RemoteClient* client, TransformerConfig* config)
+    : TransformerState(config) {
     this->buffer = buffer;
     this->client = client;
 }
@@ -145,9 +151,9 @@ void NativeTransformerBlockQkv::beginForwarding() {
     float *k0 = (float*)state->getSlicedBuffer(SB_SLICED_K, sliceIndex);
     float *v0 = (float*)state->getSlicedBuffer(SB_SLICED_V, sliceIndex);
 
-    matmul(spec->floatType, config->nThread, q0, xb, qWeights0, qSlice->n, qSlice->d0);
-    matmul(spec->floatType, config->nThread, k0, xb, kWeights0, kSlice->n, kSlice->d0);
-    matmul(spec->floatType, config->nThread, v0, xb, vWeights0, vSlice->n, vSlice->d0);
+    state->matmul->mul(spec->floatType, q0, xb, qWeights0, qSlice->n, qSlice->d0);
+    state->matmul->mul(spec->floatType, k0, xb, kWeights0, kSlice->n, kSlice->d0);
+    state->matmul->mul(spec->floatType, v0, xb, vWeights0, vSlice->n, vSlice->d0);
 
     state->sendSlicedBuffer(SB_SLICED_Q, sliceIndex);
     state->sendSlicedBuffer(SB_SLICED_K, sliceIndex);
@@ -215,7 +221,7 @@ void NativeTransformerBlockAtt::beginForwarding() {
     float *xb = (float*)state->getUnitBuffer(SB_UNIT_XB);
     float *xb2 = (float*)state->getSlicedBuffer(SB_SLICED_XB2, sliceIndex);
 
-    matmul(spec->floatType, config->nThread, xb2, xb, woWeights0, woSlice->n, woSlice->d0);
+    state->matmul->mul(spec->floatType, xb2, xb, woWeights0, woSlice->n, woSlice->d0);
     state->sendSlicedBuffer(SB_SLICED_XB2, sliceIndex);
 }
 
@@ -283,8 +289,8 @@ void NativeTransformerBlockFfn::beginForwarding() {
     float* xb = (float*)state->getUnitBuffer(SB_UNIT_XB);
     float* hb0 = (float*)state->getSlicedBuffer(SB_SLICED_HB, sliceIndex);
 
-    matmul(spec->floatType, config->nThread, hb0, xb, w1Weights0, w1Slice->n, w1Slice->d0);
-    matmul(spec->floatType, config->nThread, hb20, xb, w3Weights0, w3Slice->n, w3Slice->d0);
+    state->matmul->mul(spec->floatType, hb0, xb, w1Weights0, w1Slice->n, w1Slice->d0);
+    state->matmul->mul(spec->floatType, hb20, xb, w3Weights0, w3Slice->n, w3Slice->d0);
 
     // SwiGLU non-linearity
     for (int i = 0; i < w1Slice->d0; i++) {
@@ -358,7 +364,7 @@ void NativeTransformerBlockFfn2::beginForwarding() {
     float *hh = (float*)state->getUnitBuffer(SB_UNIT_HH);
     float *xb2 = (float*)state->getSlicedBuffer(SB_SLICED_XB2, sliceIndex);
 
-    matmul(spec->floatType, config->nThread, xb2, hh, w2Weights0, w2Slice->n, w2Slice->d0);
+    state->matmul->mul(spec->floatType, xb2, hh, w2Weights0, w2Slice->n, w2Slice->d0);
 
     state->sendSlicedBuffer(SB_SLICED_XB2, sliceIndex);
 }
@@ -719,7 +725,7 @@ void Transformer::forward(int token, int pos) {
     rmsnorm(x, x, rms_final_weight, spec->dim);
 
     // classifier into logits
-    matmul(wclsFloatType, config->nThread, logits, x, wcls, spec->dim, spec->vocabSize);
+    state->matmul->mul(wclsFloatType, logits, x, wcls, spec->dim, spec->vocabSize);
 
     if (clientOrNull != NULL) {
         clientOrNull->dumpStatistics();
@@ -777,8 +783,8 @@ void loadTransformer(Transformer** transformerOut, TransformerSpec* spec, Transf
 
     SharedBuffer* buffer = initSharedBuffer(spec);
     TransformerState* state = (clientOrNull == NULL)
-        ? (TransformerState*)new NativeTransformerState(buffer)
-        : (TransformerState*)new RemoteTransformerState(buffer, clientOrNull);
+        ? (TransformerState*)new NativeTransformerState(buffer, config)
+        : (TransformerState*)new RemoteTransformerState(buffer, clientOrNull, config);
     Transformer* transformer = new Transformer(spec, config, state, clientOrNull);
 
     printf("Loading weights...\n");

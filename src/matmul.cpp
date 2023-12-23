@@ -3,24 +3,12 @@
 #include <cstdlib>
 #include <cassert>
 #include <cstring>
-#include <pthread.h>
 #include "quants.hpp"
 #include "matmul.hpp"
 
 #if defined(__ARM_NEON)
     #include <arm_neon.h>
 #endif
-
-struct MatmulThreadInfo {
-    pthread_t handler;
-    float* output;
-    void* input;
-    void* weights;
-    FloatType type;
-    int n;
-    int ds;
-    int de;
-};
 
 void matmulF32(MatmulThreadInfo* a) {
     const float* input = (float*)a->input;
@@ -152,20 +140,53 @@ void matmulQ40vQ80(MatmulThreadInfo* a) {
 
 void* matmulThread(void* arg) {
     MatmulThreadInfo* a = (MatmulThreadInfo*)arg;
-    switch (a->type)
+    for (;;)
     {
-        case F32:
-            matmulF32(a);
-            break;
-        case F16:
-            matmulF16(a);
-            break;
-        case Q40:
-            matmulQ40vQ80(a);
-            break;
-        default:
-            printf("Unknown float type %d\n", a->type);
+        if (pthread_mutex_lock(&a->mutex)) {
+            printf("pthread_mutex_lock failed\n");
             exit(EXIT_FAILURE);
+        }
+        while (!a->hasTask) {
+            if (pthread_cond_wait(&a->cond, &a->mutex) != 0) {
+                printf("pthread_cond_wait failed\n");
+                exit(EXIT_FAILURE);
+            }
+        }
+        a->hasTask = false;
+        if (pthread_mutex_unlock(&a->mutex) != 0) {
+            printf("pthread_mutex_unlock failed\n");
+            exit(EXIT_FAILURE);
+        }
+
+        switch (a->type)
+        {
+            case F32:
+                matmulF32(a);
+                break;
+            case F16:
+                matmulF16(a);
+                break;
+            case Q40:
+                matmulQ40vQ80(a);
+                break;
+            default:
+                printf("Unknown float type %d\n", a->type);
+                exit(EXIT_FAILURE);
+        }
+
+        if (pthread_mutex_lock(&a->mutex)) {
+            printf("pthread_mutex_lock failed\n");
+            exit(EXIT_FAILURE);
+        }
+        a->hasResult = true;
+        if (pthread_cond_signal(&a->cond) != 0) {
+            printf("pthread_mutex_lock failed\n");
+            exit(EXIT_FAILURE);
+        }
+        if (pthread_mutex_unlock(&a->mutex) != 0) {
+            printf("pthread_mutex_unlock failed\n");
+            exit(EXIT_FAILURE);
+        }
     }
     return 0;
 }
@@ -177,9 +198,32 @@ void* matmulThread(void* arg) {
 //   |_________|   n | |      |_|
 //        n          |_|       1
 //                    1
-void matmul(FloatType type, int nThread, float* output, float* input, void* weights, int n, int d) {
-    MatmulThreadInfo args[nThread];
+Matmul::Matmul(int nThread) {
+    this->nThread = nThread;
+    threads = new MatmulThreadInfo[nThread];
+    for (int i = 0; i < nThread; i++) {
+        MatmulThreadInfo* thread = &threads[i];
+        thread->hasTask = false;
+        thread->hasResult = false;
+        thread->index = i;
 
+        if (pthread_mutex_init(&thread->mutex, NULL) != 0) {
+            printf("pthread_mutex_init failed\n");
+            exit(EXIT_FAILURE);
+        }
+        if (pthread_cond_init(&thread->cond, NULL) != 0) {
+            printf("pthread_cond_init failed\n");
+            exit(EXIT_FAILURE);
+        }
+        if (pthread_create(&thread->handler, NULL, matmulThread, (void*)thread) != 0) {
+            printf("pthread_create failed\n");
+            exit(EXIT_FAILURE);
+        }
+
+    }
+}
+
+void Matmul::mul(FloatType type, float* output, float* input, void* weights, int n, int d) {
     if (type == Q40) {
         BlockQ80* bq80 = new BlockQ80[n / QK80];
         quantizeQ80Row(input, bq80, n);
@@ -188,7 +232,13 @@ void matmul(FloatType type, int nThread, float* output, float* input, void* weig
 
     int i;
     for (i = 0; i < nThread; i++) {
-        MatmulThreadInfo* s = &args[i];
+        MatmulThreadInfo* s = &threads[i];
+
+        if (pthread_mutex_lock(&s->mutex) != 0) {
+            printf("pthread_mutex_lock failed\n");
+            exit(EXIT_FAILURE);
+        }
+
         s->output = output;
         s->input = input;
         s->weights = weights;
@@ -196,10 +246,35 @@ void matmul(FloatType type, int nThread, float* output, float* input, void* weig
         s->n = n;
         s->ds = i * d / nThread;
         s->de = (i + 1) * d / nThread;
-        int result = pthread_create(&args[i].handler, NULL, matmulThread, (void*)s);
+        s->hasTask = true;
+
+        if (pthread_cond_signal(&s->cond) != 0) {
+            printf("pthread_cond_signal failed\n");
+            exit(EXIT_FAILURE);
+        }
+        if (pthread_mutex_unlock(&s->mutex) != 0) {
+            printf("pthread_mutex_unlock failed\n");
+            exit(EXIT_FAILURE);
+        }
     }
     for (i = 0; i < nThread; i++) {
-        pthread_join(args[i].handler, NULL);
+        MatmulThreadInfo* thread = &threads[i];
+
+        if (pthread_mutex_lock(&thread->mutex) != 0) {
+            printf("pthread_mutex_lock failed\n");
+            exit(EXIT_FAILURE);
+        }
+        while (!thread->hasResult) {
+            if (pthread_cond_wait(&thread->cond, &thread->mutex) != 0) {
+                printf("pthread_cond_wait failed\n");
+                exit(EXIT_FAILURE);
+            }
+        }
+        thread->hasResult = false;
+        if (pthread_mutex_unlock(&thread->mutex) != 0) {
+            printf("pthread_mutex_unlock failed\n");
+            exit(EXIT_FAILURE);
+        }
     }
 
     if (type == Q40) {

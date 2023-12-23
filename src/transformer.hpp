@@ -55,6 +55,8 @@ public:
 
 class TransformerState {
 public:
+    Matmul* matmul;
+    TransformerState(TransformerConfig* config);
     virtual char* getSlicedBuffer(uint8_t bufferIndex, uint8_t sliceIndex) = 0;
     virtual char* getUnitBuffer(uint8_t bufferIndex) = 0;
     virtual void readSlicedBuffer(uint8_t bufferIndex, uint8_t sliceIndex) = 0;
@@ -66,7 +68,7 @@ class NativeTransformerState: public TransformerState {
 private:
     SharedBuffer* buffer;
 public:
-    NativeTransformerState(SharedBuffer* buffer);
+    NativeTransformerState(SharedBuffer* buffer, TransformerConfig* config);
     char* getSlicedBuffer(uint8_t bufferIndex, uint8_t sliceIndex);
     char* getUnitBuffer(uint8_t bufferIndex);
     void readSlicedBuffer(uint8_t bufferIndex, uint8_t sliceIndex);
@@ -79,7 +81,7 @@ private:
     SharedBuffer* buffer;
     RemoteClient* client;
 public:
-    RemoteTransformerState(SharedBuffer* buffer, RemoteClient* client);
+    RemoteTransformerState(SharedBuffer* buffer, RemoteClient* client, TransformerConfig* config);
     ~RemoteTransformerState();
     char* getSlicedBuffer(uint8_t bufferIndex, uint8_t sliceIndex);
     char* getUnitBuffer(uint8_t bufferIndex);
