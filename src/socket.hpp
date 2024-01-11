@@ -2,6 +2,12 @@
 #define SOCKET_HPP
 
 #include <cstddef>
+#include <netinet/in.h>
+
+enum SocketType {
+    TCP,
+    UDP
+};
 
 class SocketPool {
 private:
@@ -10,11 +16,13 @@ private:
     unsigned int recvBytes;
 
 public:
-    static SocketPool connect(unsigned int nSockets, char** hosts, int* ports);
+    static SocketPool connect(SocketType type, unsigned int nSockets, char** hosts, int* ports);
 
+    SocketType type;
     unsigned int nSockets;
+    struct sockaddr_in* addrs;
 
-    SocketPool(unsigned int nSockets, int* sockets);
+    SocketPool(SocketType type, unsigned int nSockets, int* sockets, struct sockaddr_in* addrs);
     ~SocketPool();
 
     void enableTurbo();
@@ -25,12 +33,14 @@ public:
 
 class Socket {
 private:
+    SocketType type;
     int socket;
+    struct sockaddr_in addr;
 
 public:
-    static Socket accept(int port);
+    static Socket accept(SocketType type, int port);
 
-    Socket(int socket);
+    Socket(SocketType type, int socket, struct sockaddr_in addr);
     ~Socket();
 
     void enableTurbo();

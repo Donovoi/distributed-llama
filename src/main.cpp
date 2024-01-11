@@ -10,7 +10,8 @@
 
 struct ProgramArgs {
     char* mode;
-    int nThreads; 
+    int nThreads;
+    SocketType socketType;
 
     // inference
     char* modelPath;
@@ -40,7 +41,7 @@ int inference(ProgramArgs* args) {
         return usage();
     }
 
-    SocketPool socketPool = SocketPool::connect(args->nWorkers, args->workerHosts, args->workerPorts);
+    SocketPool socketPool = SocketPool::connect(args->socketType, args->nWorkers, args->workerHosts, args->workerPorts);
     unsigned int nSlices = args->nWorkers + 1;
 
     TransformerSpec spec = Transformer::loadSpecFromFile(args->modelPath, nSlices, args->weightsFloatType, args->bufferFloatType);
@@ -65,7 +66,7 @@ int worker(ProgramArgs* args) {
         return usage();
     }
 
-    Socket socket = Socket::accept(args->port);
+    Socket socket = Socket::accept(args->socketType, args->port);
     TransformerSpec spec;
     Transformer transformer = Transformer::loadSlice(&spec, &socket);
 
@@ -92,6 +93,7 @@ int main(int argc, char *argv[]) {
     ProgramArgs args;
     args.mode = NULL;
     args.nThreads = 4;
+    args.socketType = UDP;
     args.modelPath = NULL;
     args.tokenizerPath = NULL;
     args.prompt = NULL;
