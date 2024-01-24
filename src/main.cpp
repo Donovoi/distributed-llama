@@ -10,7 +10,8 @@
 
 struct ProgramArgs {
     char* mode;
-    int nThreads; 
+    int nThreads;
+    bool skipComputations;
 
     // inference
     char* modelPath;
@@ -43,7 +44,7 @@ int inference(ProgramArgs* args) {
     SocketPool* socketPool = SocketPool::connect(args->nWorkers, args->workerHosts, args->workerPorts);
     unsigned int nSlices = args->nWorkers + 1;
 
-    TransformerSpec spec = Transformer::loadSpecFromFile(args->modelPath, nSlices, args->weightsFloatType, args->bufferFloatType);
+    TransformerSpec spec = Transformer::loadSpecFromFile(args->modelPath, nSlices, args->weightsFloatType, args->bufferFloatType, args->skipComputations);
 
     int steps = args->steps;
     if (steps > spec.seqLen) {
@@ -94,6 +95,7 @@ int main(int argc, char *argv[]) {
     ProgramArgs args;
     args.mode = NULL;
     args.nThreads = 4;
+    args.skipComputations = false;
     args.modelPath = NULL;
     args.tokenizerPath = NULL;
     args.prompt = NULL;
@@ -153,6 +155,8 @@ int main(int argc, char *argv[]) {
             args.temperature = atof(argv[i + 1]);
         } else if (strcmp(argv[i], "--topp") == 0) {
             args.topp = atof(argv[i + 1]);
+        } else if (strcmp(argv[i], "--skip-computations") == 0) {
+            args.skipComputations = atoi(argv[i + 1]) == 1;
         } else {
             printf("Unknown option %s\n", argv[i]);
             exit(EXIT_FAILURE);

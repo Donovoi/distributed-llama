@@ -49,7 +49,7 @@ long MatmulSlice::mergeOutputs(uint8_t sliceIndex, float* output, float* output0
     return offset; // offset in floats
 }
 
-TransformerSpec Transformer::loadSpecFromFile(const char* path, const unsigned int nSlices, FloatType weightsFloatType, FloatType bufferFloatType) {
+TransformerSpec Transformer::loadSpecFromFile(const char* path, const unsigned int nSlices, FloatType weightsFloatType, FloatType bufferFloatType, bool skipComputations) {
     TransformerSpec spec;
     FILE* fd = fopen(path, "rb");
     if (fd == NULL) {
@@ -76,6 +76,7 @@ TransformerSpec Transformer::loadSpecFromFile(const char* path, const unsigned i
     spec.weightsFloatType = weightsFloatType;
     spec.bufferFloatType = bufferFloatType;
     spec.nSlices = nSlices;
+    spec.skipComputations = skipComputations;
 
     printf("💡 dim: %d\n", spec.dim);
     printf("💡 hiddenDim: %d\n", spec.hiddenDim);
@@ -85,6 +86,7 @@ TransformerSpec Transformer::loadSpecFromFile(const char* path, const unsigned i
     printf("💡 vocabSize: %d\n", spec.vocabSize);
     printf("💡 seqLen: %d\n", spec.seqLen);
     printf("💡 nSlices: %d\n", spec.nSlices);
+    printf("💡 skipComputations: %d\n", spec.skipComputations);
 
     fseek(fd, 0, SEEK_END);
     size_t fileSize = ftell(fd);
@@ -154,18 +156,22 @@ Transformer::Transformer(TransformerSpec* spec, uint8_t sliceIndex) {
     this->sliceIndex = sliceIndex;
 
     buffer = new TransformerBuffer(spec);
-    blocks = new TransformerBlock*[spec->nLayers];
-    for (int i = 0; i < spec->nLayers; i++) {
-        blocks[i] = new TransformerBlock(spec, sliceIndex);
+    if (!spec->skipComputations) {
+        blocks = new TransformerBlock*[spec->nLayers];
+        for (int i = 0; i < spec->nLayers; i++) {
+            blocks[i] = new TransformerBlock(spec, sliceIndex);
+        }
     }
 
     if (IS_ROOT_SLICE(sliceIndex)) {
-        tokenEmbeddingTableBytes = spec->vocabSize * spec->dim * sizeof(float);
-        tokenEmbeddingTable = NEW_BUFFER(tokenEmbeddingTableBytes);
-        rmsFinalBytes = spec->dim * sizeof(float);
-        rmsFinal = NEW_BUFFER(rmsFinalBytes);
-        wclsBytes = getBatchBytes(spec->weightsFloatType, spec->vocabSize, spec->dim);
-        wcls = NEW_BUFFER(wclsBytes);
+        if (!spec->skipComputations) {
+            tokenEmbeddingTableBytes = spec->vocabSize * spec->dim * sizeof(float);
+            tokenEmbeddingTable = NEW_BUFFER(tokenEmbeddingTableBytes);
+            rmsFinalBytes = spec->dim * sizeof(float);
+            rmsFinal = NEW_BUFFER(rmsFinalBytes);
+            wclsBytes = getBatchBytes(spec->weightsFloatType, spec->vocabSize, spec->dim);
+            wcls = NEW_BUFFER(wclsBytes);
+        }
         x = (float*)NEW_BUFFER(spec->dim * sizeof(float));
         logits = (float*)NEW_BUFFER(spec->vocabSize * sizeof(float));
     }
@@ -173,15 +179,20 @@ Transformer::Transformer(TransformerSpec* spec, uint8_t sliceIndex) {
 
 Transformer::~Transformer() {
     delete buffer;
-    for (int i = 0; i < spec->nLayers; i++) {
-        delete blocks[i];
+    if (!spec->skipComputations) {
+        for (int i = 0; i < spec->nLayers; i++) {
+            delete blocks[i];
+        }
+        delete[] blocks;
     }
-    delete[] blocks;
+
 
     if (IS_ROOT_SLICE(sliceIndex)) {
-        FREE_BUFFER(tokenEmbeddingTable);
-        FREE_BUFFER(rmsFinal);
-        FREE_BUFFER(wcls);
+        if (!spec->skipComputations) {
+            FREE_BUFFER(tokenEmbeddingTable);
+            FREE_BUFFER(rmsFinal);
+            FREE_BUFFER(wcls);
+        }
         FREE_BUFFER(x);
         FREE_BUFFER(logits);
     }
@@ -309,6 +320,10 @@ Transformer Transformer::loadRoot(char* data, TransformerSpec* spec, SocketPool*
         }
     }
 
+    if (spec->skipComputations) {
+        return transformer;
+    }
+
     char* w = data;
 
     memcpy(transformer.tokenEmbeddingTable, w, transformer.tokenEmbeddingTableBytes);
@@ -358,9 +373,13 @@ Transformer Transformer::loadSlice(TransformerSpec* spec, Socket* socket) {
 
     printf("💡 sliceIndex: %d\n", sliceIndex);
     printf("💡 nSlices: %d\n", spec->nSlices);
+    printf("💡 skipComputations: %d\n", spec->skipComputations);
 
     assert(sliceIndex >= 1);
     Transformer transformer(spec, sliceIndex);
+    if (spec->skipComputations) {
+        return transformer;
+    }
 
     for (int i = 0; i < spec->nLayers; i++) {
         TransformerBlock* block = transformer.blocks[i];

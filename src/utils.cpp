@@ -109,7 +109,9 @@ void* TaskLoop::threadHandler(void* arg) {
             loop->currentTaskIndex.fetch_add(1);
         } else {
             while (loop->currentTaskIndex.load() == currentTaskIndex) {
-                // NOP
+                if (loop->stop.load()) {
+                    break;
+                }
             }
         }
     }

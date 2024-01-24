@@ -45,6 +45,7 @@ struct TransformerSpec {
     FloatType weightsFloatType;
     FloatType bufferFloatType;
     uint8_t nSlices;
+    bool skipComputations;
 };
 
 class TransformerBlock {
@@ -129,7 +130,7 @@ public:
 
     ~Transformer();
 
-    static TransformerSpec loadSpecFromFile(const char* path, const unsigned int nSlices, FloatType weightsFloatType, FloatType bufferFloatType);
+    static TransformerSpec loadSpecFromFile(const char* path, const unsigned int nSlices, FloatType weightsFloatType, FloatType bufferFloatType, bool skipComputations);
     static Transformer loadRootFromFile(const char* path, TransformerSpec* spec, SocketPool* socketPool);
     static Transformer loadRoot(char* data, TransformerSpec* spec, SocketPool* socketPool);
     static Transformer loadSlice(TransformerSpec* spec, Socket* socket);
